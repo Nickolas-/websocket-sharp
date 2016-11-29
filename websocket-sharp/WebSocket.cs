@@ -52,6 +52,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using WebSocketSharp.Net;
 using WebSocketSharp.Net.WebSockets;
 
@@ -1636,28 +1637,28 @@ namespace WebSocketSharp
       }
     }
 
-    private void sendAsync (Opcode opcode, Stream stream, Action<bool> completed)
-    {
+    private Task<bool> sendAsync (Opcode opcode, Stream stream)
+		{
+			var tsc = new TaskCompletionSource<bool> ();
       Func<Opcode, Stream, bool> sender = send;
-      sender.BeginInvoke (
-        opcode,
-        stream,
-        ar => {
-          try {
-            var sent = sender.EndInvoke (ar);
-            if (completed != null)
-              completed (sent);
-          }
-          catch (Exception ex) {
-            _logger.Error (ex.ToString ());
-            error (
-              "An exception has occurred during the callback for an async send.",
-              ex
-            );
-          }
-        },
-        null
-      );
+			sender.BeginInvoke (opcode,
+			  stream,
+			  ar => {
+				  try {
+					  var sent = sender.EndInvoke (ar);
+					  tsc.TrySetResult (sent);
+				  } catch (Exception ex) {
+					  _logger.Error (ex.ToString ());
+					  error (
+				  "An exception has occurred during the callback for an async send.",
+				  ex
+				);
+					  tsc.TrySetException (ex);
+				  }
+			  },
+			  null
+							   );
+			return tsc.Task;
     }
 
     private bool sendBytes (byte[] bytes)
@@ -2690,40 +2691,7 @@ namespace WebSocketSharp
         throw new ArgumentNullException ("data");
 
       send (Opcode.Binary, new MemoryStream (data));
-    }
-
-    /// <summary>
-    /// Sends the specified <paramref name="file"/> as the binary data using
-    /// the WebSocket connection.
-    /// </summary>
-    /// <param name="file">
-    /// A <see cref="FileInfo"/> that represents the file to send.
-    /// </param>
-    /// <exception cref="InvalidOperationException">
-    /// The current state of the connection is not Open.
-    /// </exception>
-    /// <exception cref="ArgumentNullException">
-    /// <paramref name="file"/> is <see langword="null"/>.
-    /// </exception>
-    /// <exception cref="ArgumentException">
-    /// <paramref name="file"/> cannot be opened to read.
-    /// </exception>
-    public void Send (FileInfo file)
-    {
-      if (_readyState != WebSocketState.Open) {
-        var msg = "The current state of the connection is not Open.";
-        throw new InvalidOperationException (msg);
-      }
-
-      if (file == null)
-        throw new ArgumentNullException ("file");
-
-      FileStream stream;
-      if (!file.TryOpenRead (out stream))
-        throw new ArgumentException ("Cannot be opened to read.", "file");
-
-      send (Opcode.Binary, stream);
-    }
+    }    
 
     /// <summary>
     /// Sends the specified <paramref name="data"/> using the WebSocket connection.
@@ -2771,7 +2739,7 @@ namespace WebSocketSharp
     /// the send is complete. A <see cref="bool"/> passed to this delegate is <c>true</c>
     /// if the send is complete successfully.
     /// </param>
-    public void SendAsync (byte[] data, Action<bool> completed)
+    public Task<bool> SendAsync (byte[] data)
     {
       var msg = _readyState.CheckIfAvailable (false, true, false, false) ??
                 CheckSendParameter (data);
@@ -2780,40 +2748,10 @@ namespace WebSocketSharp
         _logger.Error (msg);
         error ("An error has occurred in sending data.", null);
 
-        return;
+				return Task.FromResult<bool> (false);
       }
 
-      sendAsync (Opcode.Binary, new MemoryStream (data), completed);
-    }
-
-    /// <summary>
-    /// Sends the specified <paramref name="file"/> as binary data asynchronously using
-    /// the WebSocket connection.
-    /// </summary>
-    /// <remarks>
-    /// This method doesn't wait for the send to be complete.
-    /// </remarks>
-    /// <param name="file">
-    /// A <see cref="FileInfo"/> that represents the file to send.
-    /// </param>
-    /// <param name="completed">
-    /// An <c>Action&lt;bool&gt;</c> delegate that references the method(s) called when
-    /// the send is complete. A <see cref="bool"/> passed to this delegate is <c>true</c>
-    /// if the send is complete successfully.
-    /// </param>
-    public void SendAsync (FileInfo file, Action<bool> completed)
-    {
-      var msg = _readyState.CheckIfAvailable (false, true, false, false) ??
-                CheckSendParameter (file);
-
-      if (msg != null) {
-        _logger.Error (msg);
-        error ("An error has occurred in sending data.", null);
-
-        return;
-      }
-
-      sendAsync (Opcode.Binary, file.OpenRead (), completed);
+			return sendAsync (Opcode.Binary, new MemoryStream (data));
     }
 
     /// <summary>
@@ -2830,7 +2768,7 @@ namespace WebSocketSharp
     /// the send is complete. A <see cref="bool"/> passed to this delegate is <c>true</c>
     /// if the send is complete successfully.
     /// </param>
-    public void SendAsync (string data, Action<bool> completed)
+    public Task<bool> SendAsync (string data)
     {
       var msg = _readyState.CheckIfAvailable (false, true, false, false) ??
                 CheckSendParameter (data);
@@ -2839,10 +2777,10 @@ namespace WebSocketSharp
         _logger.Error (msg);
         error ("An error has occurred in sending data.", null);
 
-        return;
+       return Task.FromResult<bool> (false);
       }
 
-      sendAsync (Opcode.Text, new MemoryStream (data.UTF8Encode ()), completed);
+      return sendAsync (Opcode.Text, new MemoryStream (data.UTF8Encode ()));
     }
 
     /// <summary>
@@ -2863,8 +2801,9 @@ namespace WebSocketSharp
     /// the send is complete. A <see cref="bool"/> passed to this delegate is <c>true</c>
     /// if the send is complete successfully.
     /// </param>
-    public void SendAsync (Stream stream, int length, Action<bool> completed)
+    public Task<bool> SendAsync (Stream stream, int length)
     {
+			var tsc = new TaskCompletionSource<bool> ();
       var msg = _readyState.CheckIfAvailable (false, true, false, false) ??
                 CheckSendParameters (stream, length);
 
@@ -2872,7 +2811,7 @@ namespace WebSocketSharp
         _logger.Error (msg);
         error ("An error has occurred in sending data.", null);
 
-        return;
+				tsc.TrySetException (new Exception (msg));
       }
 
       stream.ReadBytesAsync (
@@ -2883,7 +2822,7 @@ namespace WebSocketSharp
             _logger.Error ("The data cannot be read from 'stream'.");
             error ("An error has occurred in sending data.", null);
 
-            return;
+            tsc.TrySetException (new Exception ("An error has occurred in sending data."));
           }
 
           if (len < length)
@@ -2896,14 +2835,15 @@ namespace WebSocketSharp
             );
 
           var sent = send (Opcode.Binary, new MemoryStream (data));
-          if (completed != null)
-            completed (sent);
+			tsc.TrySetResult (sent);
         },
         ex => {
           _logger.Error (ex.ToString ());
           error ("An exception has occurred while sending data.", ex);
+					tsc.TrySetException (ex);
         }
       );
+			return tsc.Task;
     }
 
     /// <summary>

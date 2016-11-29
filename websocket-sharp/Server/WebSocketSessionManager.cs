@@ -736,7 +736,7 @@ namespace WebSocketSharp.Server
     {
       IWebSocketSession session;
       if (TryGetSession (id, out session))
-        session.Context.WebSocket.SendAsync (data, completed);
+        session.Context.WebSocket.SendAsync (data);
     }
 
     /// <summary>
@@ -761,7 +761,7 @@ namespace WebSocketSharp.Server
     {
       IWebSocketSession session;
       if (TryGetSession (id, out session))
-        session.Context.WebSocket.SendAsync (data, completed);
+        session.Context.WebSocket.SendAsync (data);
     }
 
     /// <summary>
@@ -785,11 +785,11 @@ namespace WebSocketSharp.Server
     /// the send is complete. A <see cref="bool"/> passed to this delegate is <c>true</c>
     /// if the send is complete successfully.
     /// </param>
-    public void SendToAsync (Stream stream, int length, string id, Action<bool> completed)
+    public void SendToAsync (Stream stream, int length, string id)
     {
       IWebSocketSession session;
       if (TryGetSession (id, out session))
-        session.Context.WebSocket.SendAsync (stream, length, completed);
+        session.Context.WebSocket.SendAsync (stream, length);
     }
 
     /// <summary>
