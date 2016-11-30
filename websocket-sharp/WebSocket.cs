@@ -1014,10 +1014,21 @@ namespace WebSocketSharp
       closeAsync (new CloseEventArgs (code, reason), send, send, false);
     }
 
-    private void closeAsync (CloseEventArgs e, bool send, bool receive, bool received)
+		private void closeAsync (CloseEventArgs e, bool send, bool receive, bool received)
+		{
+			Action<CloseEventArgs, bool, bool, bool> closer = close;
+			closer.BeginInvoke (e, send, receive, received, ar => {
+				closer.EndInvoke (ar);
+			}, null);
+		}
+
+    private void closeAsync (CloseEventArgs e, bool send, bool receive, bool received, TaskCompletionSource<bool> closeTask)
     {
       Action<CloseEventArgs, bool, bool, bool> closer = close;
-      closer.BeginInvoke (e, send, receive, received, ar => closer.EndInvoke (ar), null);
+			closer.BeginInvoke (e, send, receive, received, ar => {
+				closer.EndInvoke (ar);
+				closeTask?.TrySetResult (true);
+			}, null);
     }
 
     private bool closeHandshake (byte[] frameAsBytes, bool receive, bool received)
@@ -2416,24 +2427,39 @@ namespace WebSocketSharp
       close ((ushort) code, reason);
     }
 
-    /// <summary>
-    /// Closes the WebSocket connection asynchronously, and releases
-    /// all associated resources.
-    /// </summary>
-    /// <remarks>
-    /// This method does not wait for the close to be complete.
-    /// </remarks>
-    public void CloseAsync ()
+		/// <summary>
+		/// Closes the WebSocket connection asynchronously, and releases
+		/// all associated resources.
+		/// </summary>
+		/// <remarks>
+		/// This method await for the close to be complete.
+		/// </remarks>`
+
+
+		private TaskCompletionSource<bool> CloseTask;
+		public Task<bool> CloseAsync ()
     {
-      string msg;
-      if (!checkIfAvailable (true, true, false, false, out msg)) {
-        _logger.Error (msg);
-        error ("An error has occurred in closing the connection.", null);
+			return Task.Run (() => {
+				if (CloseTask != null && !CloseTask.Task.IsCompleted) {
+					return CloseTask.Task;
+				}
 
-        return;
-      }
+				if (ConnectTask != null && ConnectTask.Task.IsCompleted) {
+					ConnectTask.Task.Wait ();
+				}
 
-      closeAsync (new CloseEventArgs (), true, true, false);
+				CloseTask = new TaskCompletionSource<bool> ();
+				string msg;
+				if (!checkIfAvailable (true, true, false, false, out msg)) {
+					_logger.Error (msg);
+					error ("An error has occurred in closing the connection.", null);
+
+					CloseTask.TrySetResult (false);
+				}
+
+				closeAsync (new CloseEventArgs (), true, true, false, CloseTask);
+				return CloseTask.Task;
+			});
     }
 
     /// <summary>
@@ -2610,30 +2636,32 @@ namespace WebSocketSharp
 		private TaskCompletionSource<bool> ConnectTask;
     public Task<bool> ConnectAsync ()
     {
-		if (ConnectTask != null) {
-			return ConnectTask.Task;
-		}
-		ConnectTask = new TaskCompletionSource<bool> ();
+			return Task.Run (() => {
+				if (ConnectTask != null && !ConnectTask.Task.IsCompleted) {
+					return ConnectTask.Task;
+				}
+				ConnectTask = new TaskCompletionSource<bool> ();
 
-      string msg;
-      if (!checkIfAvailable (true, false, true, false, false, true, out msg)) {
-        _logger.Error (msg);
-        error ("An error has occurred in connecting.", null);
+				string msg;
+				if (!checkIfAvailable (true, false, true, false, false, true, out msg)) {
+					_logger.Error (msg);
+					error ("An error has occurred in connecting.", null);
 
-				ConnectTask.TrySetResult (false);
-      }
+					ConnectTask.TrySetResult (false);
+				}
 
-      Func<bool> connector = connect;
-      connector.BeginInvoke (
-        ar => {
-			if (connector.EndInvoke (ar)) {
-				open ();
-						ConnectTask.TrySetResult (true);
-			}
-        },
-        null
-      );
-			return ConnectTask.Task;
+				Func<bool> connector = connect;
+				connector.BeginInvoke (
+				  ar => {
+					  if (connector.EndInvoke (ar)) {
+						  open ();
+						  ConnectTask.TrySetResult (true);
+					  }
+				  },
+				  null
+				);
+				return ConnectTask.Task;
+			});
     }
 
     /// <summary>
