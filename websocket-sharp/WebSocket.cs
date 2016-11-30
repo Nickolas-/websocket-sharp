@@ -2594,35 +2594,46 @@ namespace WebSocketSharp
         open ();
     }
 
-    /// <summary>
-    /// Establishes a WebSocket connection asynchronously.
-    /// </summary>
-    /// <remarks>
-    ///   <para>
-    ///   This method does not wait for the connect to be complete.
-    ///   </para>
-    ///   <para>
-    ///   This method is not available in a server.
-    ///   </para>
-    /// </remarks>
-    public void ConnectAsync ()
+		/// <summary>
+		/// Establishes a WebSocket connection asynchronously.
+		/// </summary>
+		/// <remarks>
+		///   <para>
+		///   This method await for the connect to be complete.
+		///   </para>
+		///   <para>
+		///   This method is not available in a server.
+		///   </para>
+		/// </remarks>
+
+
+		private TaskCompletionSource<bool> ConnectTask;
+    public Task<bool> ConnectAsync ()
     {
+		if (ConnectTask != null) {
+			return ConnectTask.Task;
+		}
+		ConnectTask = new TaskCompletionSource<bool> ();
+
       string msg;
       if (!checkIfAvailable (true, false, true, false, false, true, out msg)) {
         _logger.Error (msg);
         error ("An error has occurred in connecting.", null);
 
-        return;
+				ConnectTask.TrySetResult (false);
       }
 
       Func<bool> connector = connect;
       connector.BeginInvoke (
         ar => {
-          if (connector.EndInvoke (ar))
-            open ();
+			if (connector.EndInvoke (ar)) {
+				open ();
+						ConnectTask.TrySetResult (true);
+			}
         },
         null
       );
+			return ConnectTask.Task;
     }
 
     /// <summary>
